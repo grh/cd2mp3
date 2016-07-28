@@ -1,0 +1,83 @@
+#!/usr/bin/env ruby
+
+# print a short help message
+def usage
+    puts 'cd2mp3 version 1.0.0
+        
+usage: cd2mp3 [options] <album-directory>
+        
+OPTIONS:
+  -d data-file    path to file containing album info in a Ruby hash.
+  -q quality      either 1, 2, or 3'
+end
+
+# check for right number of arguments
+if ARGV.size != 5
+    usage
+    exit
+end
+
+# parse command-line arguments into an options hash
+ARGV.insert(-2, :albumdir)
+opts = Hash[*ARGV]
+
+# check that data file and quality level options are present
+if opts['-d'].nil? or opts['-q'].nil?
+    usage
+    exit
+end
+
+# make all hash keys into symbols
+opts[:datafile] = opts['-d']; opts.delete('-d')
+opts[:quality] = opts['-q'].to_i; opts.delete('-q')
+
+# determine desired quality level
+case opts[:quality]
+    when 1
+        preset = 'extreme'
+    when 2
+        preset = 'standard'
+    when 3
+        preset = 'medium'
+    else
+        usage
+        exit
+end
+
+# read in the data file to a temporary .rb data file
+`cat #{opts[:datafile]} > #{opts[:datafile]}.rb`
+require_relative "#{opts[:datafile]}"
+
+# create the album directory if it doesn't already exist
+`mkdir -p \"#{opts[:albumdir]}\"`
+
+# rip the cd into wav format
+@album_info[:tracks].each do |track|
+    cmd = "cdparanoia #{track[:track_number]} \"#{opts[:albumdir]}/#{track[:track_number]} - #{track[:track_title]}.wav\""
+    `#{cmd}`
+end
+
+# encode each wav to mp3 then delete the wav file
+@album_info[:tracks].each do |track|
+    cmd = "lame \\
+           --replaygain-accurate \\
+           --preset #{preset} \\
+           --id3v2-only \\
+           --tv TCOM=\"#{@album_info[:album_artist]}\" \\
+           --tv TALB=\"#{@album_info[:album_title]}\" \\
+           --tv TYER=#{@album_info[:album_year]} \\
+           --tv TCON=\"#{@album_info[:album_genre]}\" \\
+           --ti #{@album_info[:album_art]} \\
+           --tv TIT1=\"#{@album_info[:collection]}\" \\
+           --tv TIT2=\"#{track[:track_title]}\" \\
+           --tv TPE1=\"#{track[:track_artist]}\" \\
+           --tv TPOS=\"#{@album_info[:sequence_number]}\" \\
+           --tv TRCK=#{track[:track_number]} \\
+           \"#{opts[:albumdir]}/#{track[:track_number]} - #{track[:track_title]}.wav\" \\
+           \"#{opts[:albumdir]}/#{track[:track_number]} - #{track[:track_title]}.mp3\""
+
+    `#{cmd} && rm -f "#{opts[:albumdir]}/#{track[:track_number]} - #{track[:track_title]}.wav"`
+end
+
+# delete the temporary .rb data file
+`rm -f #{opts[:datafile]}.rb`
